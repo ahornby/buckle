@@ -212,22 +212,28 @@ fn get_buck2_path() -> Result<PathBuf, Error> {
 }
 
 fn main() -> Result<(), Error> {
-    let buck2_path = dbg!(get_buck2_path()?);
+    let binary_path = dbg!(get_buck2_path()?);
 
     // Collect information indented for buck2 binary.
     let mut args = env::args_os();
     args.next(); // Skip buckle
-    let envs = env::vars_os();
+
+    let envs = env::vars_os();    
 
     // Pass all file descriptors through as well.
-    Command::new(buck2_path)
+    let status = Command::new(&binary_path)
         .args(args)
         .envs(envs)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .output()
-        .expect("Failed to execute buck2.");
+        .unwrap_or_else(|_| panic!("Failed to execute {:?}", &binary_path))
+        .status;
+
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
 
     Ok(())
 }
