@@ -24,6 +24,6 @@ jobs:
     - name: Build
       run: cargo build
     - name: Test
-      run: cargo test
+      run: RUST_BACKTRACE=1 cargo test
     - name: Lint
       run: cargo clippy
