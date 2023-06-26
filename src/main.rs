@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Error};
+use anyhow::{anyhow, Context, Error};
 use serde::{Deserialize, Serialize};
 use std::{
     env,
@@ -7,6 +7,7 @@ use std::{
     process::{Command, Stdio},
 };
 use std::{io::Write, time::SystemTime};
+use tempfile::NamedTempFile;
 use url::Url;
 
 #[cfg(unix)]
@@ -160,21 +161,32 @@ fn download_http(version: String, output_dir: &Path) -> Result<PathBuf, Error> {
         ));
     };
 
-    path.push("buck2");
-    if path.exists() {
-        return Ok(path);
-    }
-    if let Some(prefix) = path.parent() {
-        fs::create_dir_all(prefix)?;
+    let final_name = {
+        let mut p = path.clone();
+        p.push("buck2");
+        p
+    };
+    if final_name.exists() {
+        // unpacked already present, so do nothing
+        return Ok(final_name);
     }
 
-    let buck2_bin = File::create(&path)?;
+    fs::create_dir_all(&path).with_context(|| anyhow!("problem creating {:?}", path))?;
+
+    // create a temporary file in the same directory as the final file
+    let mut tmp_file = NamedTempFile::new_in(path)?;
+
     let resp = reqwest::blocking::get(url)?;
-    zstd::stream::copy_decode(resp, buck2_bin).unwrap();
+    zstd::stream::copy_decode(resp, &tmp_file)?;
+    tmp_file.flush()?;
     let permissions = fs::Permissions::from_mode(0o755);
-    fs::set_permissions(&path, permissions)?;
+    fs::set_permissions(tmp_file.path(), permissions)?;
 
-    Ok(path)
+    // only move to final name once fully written and stable
+    fs::rename(tmp_file.path(), &final_name)
+        .with_context(|| anyhow!("problem renaming to {:?}", final_name))?;
+
+    Ok(final_name)
 }
 
 fn read_buck2_version() -> Result<String, Error> {
