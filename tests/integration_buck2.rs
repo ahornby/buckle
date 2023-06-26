@@ -1,7 +1,7 @@
 #[cfg(test)]
 use assert_cmd::Command;
 
-/// Integration tests that buckle can download buck2 and run it with same arguments.
+// Integration tests that buckle can download buck2 and run it with same arguments.
 #[test]
 fn test_buck2_latest() {
     let tmpdir = tempfile::TempDir::new().unwrap();
