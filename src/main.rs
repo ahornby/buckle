@@ -1,4 +1,5 @@
 use anyhow::{anyhow, bail, Context, Error};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
     env,
@@ -169,39 +170,57 @@ fn download_from_github(
 
     let mut path = output_dir.to_path_buf();
     let mut artifact = None;
+    let mut release_name = None;
 
-    // simple templating, we'll need this even if we add regex support
+    // simple templating, we need this even with regex support
     let mut artifact_name = artifact_pattern.to_string();
-    artifact_name = artifact_name.replace("%version%", &gh_release.version);
     artifact_name = artifact_name.replace("%arch%", env::consts::ARCH);
     artifact_name = artifact_name.replace("%os%", get_triple_os());
     artifact_name = artifact_name.replace("%target%", get_target()?);
 
+    let version_re = Regex::new(&gh_release.version)?;
+
     for release in releases {
-        if release.name.as_ref() == Some(&gh_release.version) {
+        if release
+            .name
+            .as_ref()
+            .map_or(false, |s| version_re.is_match(s))
+        {
             if release.tag_name == "latest" {
                 path.push(release.target_commitish);
             } else {
                 // TODO use sha256 checksum if present
-                path.push(release.name.ok_or_else(|| anyhow!("Release has no name"))?);
+                path.push(
+                    release
+                        .name
+                        .as_ref()
+                        .ok_or_else(|| anyhow!("Release has no name"))?,
+                );
             }
+            let artifact_name = artifact_name.replace(
+                "%version%",
+                release.name.as_ref().unwrap_or(&gh_release.version),
+            );
+            let artifact_re = Regex::new(&artifact_name)?;
             for asset in release.assets {
                 let name = asset.name;
                 let url = asset.browser_download_url;
-                if name == artifact_name {
+                if artifact_re.is_match(&name) {
                     artifact = Some((name, url));
+                    release_name = release.name;
                     break;
                 }
             }
-        }
+        };
     }
 
     let (_name, url) = if let Some((name, url)) = artifact {
         (name, url)
     } else {
         bail!(
-            "Could not find {}. Its possible {} has changed their releasing method for {}. Please update buckle.",
+            "Could not find {} in {}. Its possible {} has changed their releasing method for {}. Please update buckle.",
             artifact_name,
+            release_name.as_ref().unwrap_or(&gh_release.version),
             gh_release.owner,
             gh_release.repo
         )
@@ -229,7 +248,6 @@ where
         // unpacked already present, so do nothing
         return Ok(final_name);
     }
-
 
     // create a temporary file in the same directory as the final file
     let mut tmp_file = NamedTempFile::new_in(path)?;
